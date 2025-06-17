@@ -7,6 +7,7 @@ import cv_bridge
 import cv2.aruco as aruco
 import asyncio
 import math
+import time
 from enum import Enum
 
 # ROS 2のメッセージ型とサービス型をインポート
@@ -49,7 +50,7 @@ class ArucoLandingNode(Node):
         # --- ROS 2のセットアップ ---
         qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
-            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            durability=DurabilityPolicy.VOLATILE,
             history=HistoryPolicy.KEEP_LAST,
             depth=10
         )
