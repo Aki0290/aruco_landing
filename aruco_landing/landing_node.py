@@ -40,19 +40,19 @@ class ArucoLandingNode(Node):
 
         # --- 探索ロジック用パラメータ ---
         self.search_timer = None
-        self.search_radius = 1.0  # 探索開始半径 (m)
+        self.search_radius = 0.5  # 探索開始半径 (m)
         self.search_height = 2.5  # 探索高度 (m)
         self.max_search_radius = 3.5 # 最大探索半径 (m)
         self.search_angle = 0.0
         self.search_radius_step = 0.3 # 1周ごとの半径増加量
-        self.search_angle_step = 0.4  # 角度の増加量 (rad)
+        self.search_angle_step = 0.1  # 角度の増加量 (rad)
 
         # --- ROS 2のセットアップ ---
         qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.VOLATILE,
             history=HistoryPolicy.KEEP_LAST,
-            depth=10
+            depth=1
         )
         self.bridge = cv_bridge.CvBridge()
         self.current_state = None
