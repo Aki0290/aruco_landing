@@ -19,7 +19,7 @@ setup(
     license='TODO: License declaration',
     tests_require=['pytest'],
     entry_points={
-        'console_scripts': [ 'landing_node = aruco_landing.landing_node:main_sync', # async mainをラップ
+        'console_scripts': [ 'landing_node = aruco_landing.landing_node:main', # async mainをラップ
         ],
     },
 )

@@ -51,7 +51,7 @@ class ArucoLandingNode(Node):
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             history=HistoryPolicy.KEEP_LAST,
-            depth=1
+            depth=10
         )
         self.bridge = cv_bridge.CvBridge()
         self.current_state = None
@@ -65,8 +65,8 @@ class ArucoLandingNode(Node):
         self.dist_coeffs = np.zeros(5, dtype=np.float32)
         
         # サブスクライバー
-        self.state_sub = self.create_subscription(State, '/mavros/state', self.state_callback, 10)
-        self.pose_sub = self.create_subscription(PoseStamped, '/mavros/local_position/pose', self.pose_callback, 10)
+        self.state_sub = self.create_subscription(State, '/mavros/state', self.state_callback, qos_profile)
+        self.pose_sub = self.create_subscription(PoseStamped, '/mavros/local_position/pose', self.pose_callback, qos_profile)
         self.image_sub = self.create_subscription(Image, '/camera/image_raw', self.image_callback, qos_profile)
 
         # パブリッシャー
@@ -254,9 +254,9 @@ class ArucoLandingNode(Node):
             self.setpoint_pub.publish(offboard_setpoint)
             await asyncio.sleep(0.02)
         
-        # 1. モードをOFFBOARDに設定
+        # 1. モードをGUIDEDに設定
         set_mode_req = SetMode.Request()
-        set_mode_req.custom_mode = 'OFFBOARD'
+        set_mode_req.custom_mode = 'GUIDED'
         await self.call_service(self.set_mode_client, set_mode_req)
         await asyncio.sleep(0.5)
 
