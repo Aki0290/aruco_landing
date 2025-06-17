@@ -50,21 +50,22 @@ class ArucoLandingNode(Node):
         # --- ROS 2のセットアップ ---
         qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
             durability=DurabilityPolicy.VOLATILE,
             history=HistoryPolicy.KEEP_LAST,
-            depth=1
+            depth=10
         )
         self.bridge = cv_bridge.CvBridge()
         self.current_state = None
         self.current_pose = None
-        
+
         # ArUcoのセットアップ
         self.aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
         self.aruco_params = aruco.DetectorParameters_create()
         # あなたのシミュレーションカメラに合わせた値 (要調整)
         self.camera_matrix = np.array([[600, 0, 320], [0, 600, 240], [0, 0, 1]], dtype=np.float32)
         self.dist_coeffs = np.zeros(5, dtype=np.float32)
-        
+
         # サブスクライバー
         self.state_sub = self.create_subscription(State, '/mavros/state', self.state_callback, qos_profile)
         self.pose_sub = self.create_subscription(PoseStamped, '/mavros/local_position/pose', self.pose_callback, qos_profile)
@@ -109,7 +110,7 @@ class ArucoLandingNode(Node):
                 # マーカー上空へ移動
                 if self.mission_state == MissionState.CENTERING:
                     self.center_over_marker(tvec)
-            
+
             elif self.mission_state == MissionState.CENTERING:
                 # センタリング中にマーカーを見失った場合
                 self.get_logger().warn('Lost the marker. Going back to search mode.')
@@ -124,14 +125,14 @@ class ArucoLandingNode(Node):
         """フレームからArUcoマーカーを検出し、IDと相対位置ベクトルを返す"""
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         corners, ids, _ = aruco.detectMarkers(gray, self.aruco_dict, parameters=self.aruco_params)
-        
+
         if ids is not None and len(ids) > 0:
             # 複数のマーカーが検出されても、最初のものだけを処理する
             rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(
                 corners, self.marker_length, self.camera_matrix, self.dist_coeffs
             )
             return tvecs[0][0], ids[0][0]
-        
+
         return None, -1 # 見つからなかった場合
 
     # --- ミッション制御ロジック ---
@@ -151,7 +152,7 @@ class ArucoLandingNode(Node):
             target_y = self.current_pose.pose.position.y + dx
             # 高度は現在の高さを維持
             target_z = self.current_pose.pose.position.z 
-            
+
             self.get_logger().info(f"Centering... Moving to x:{target_x:.2f}, y:{target_y:.2f}")
 
             target_pose = PoseStamped()
@@ -161,7 +162,7 @@ class ArucoLandingNode(Node):
             target_pose.pose.position.y = target_y
             target_pose.pose.position.z = target_z
             target_pose.pose.orientation = self.current_pose.pose.orientation
-            
+
             self.setpoint_pub.publish(target_pose)
             self.last_marker_pose = target_pose
 
@@ -227,7 +228,7 @@ class ArucoLandingNode(Node):
         # req.longitude = ...
         # req.altitude = ...
         await self.call_service(self.land_client, req)
-        
+
         self.mission_state = MissionState.MISSION_COMPLETE
         self.get_logger().info("Mission complete. Shutting down in 5 seconds.")
         await asyncio.sleep(5)
@@ -242,19 +243,19 @@ class ArucoLandingNode(Node):
             await asyncio.sleep(1)
 
         self.get_logger().info("Drone is ready. Starting mission sequence.")
-        
+
         # OFFBOARDモードに移行するために、setpointのストリーミングを開始
         offboard_setpoint = PoseStamped()
         offboard_setpoint.header.frame_id = "map"
         offboard_setpoint.pose.position.z = self.search_height
-        
+
         for i in range(100): # 接続を安定させるために100回ほど送信
             offboard_setpoint.header.stamp = self.get_clock().now().to_msg()
             offboard_setpoint.pose.position.x = self.current_pose.pose.position.x
             offboard_setpoint.pose.position.y = self.current_pose.pose.position.y
             self.setpoint_pub.publish(offboard_setpoint)
             await asyncio.sleep(0.02)
-        
+
         # 1. モードをGUIDEDに設定
         set_mode_req = SetMode.Request()
         set_mode_req.custom_mode = 'GUIDED'
@@ -270,18 +271,18 @@ class ArucoLandingNode(Node):
         # 3. 離陸
         self.get_logger().info(f"Taking off to {self.search_height}m...")
         start_time = time.time()
-        while time.time() - start_time < 15: # タイムアウトを15秒に設定
+        while time.time() - start_time < 30: # タイムアウトを30秒に設定
             offboard_setpoint.header.stamp = self.get_clock().now().to_msg()
             offboard_setpoint.pose.position.x = self.current_pose.pose.position.x
             offboard_setpoint.pose.position.y = self.current_pose.pose.position.y
             self.setpoint_pub.publish(offboard_setpoint)
-            
+
             # 目標高度に到達したかチェック
             if abs(self.current_pose.pose.position.z - self.search_height) < 0.2:
                 self.get_logger().info("Takeoff complete.")
                 break
             await asyncio.sleep(0.1)
-        
+
         # 離陸地点を保存
         self.takeoff_position = self.current_pose
         self.get_logger().info(f"Takeoff position saved: x={self.takeoff_position.pose.position.x:.2f}, y={self.takeoff_position.pose.position.y:.2f}")
@@ -296,10 +297,10 @@ def main(args=None):
 
     # 非同期のメインループを作成
     loop = asyncio.get_event_loop()
-    
+
     # run_missionを非同期タスクとして実行
     mission_task = loop.create_task(node.run_mission())
-    
+
     # rclpy.spinを別スレッドで実行してコールバックを処理
     spin_thread = asyncio.to_thread(rclpy.spin, node)
 
@@ -308,3 +309,4 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+
