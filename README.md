@@ -1,6 +1,9 @@
 1つ目のターミナル
-cd ros2_ws
+cd ros2_ws mavros 
+colcon build --packages-select aruco_landing
+source ~/ros2_ws/install/setup.bash
 ros2 run aruco_landing landing_node
+
 
 2つ目のターミナル
 cd ardupilot/ArduCopter
