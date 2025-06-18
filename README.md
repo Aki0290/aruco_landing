@@ -1,4 +1,4 @@
-###今回使用しているパッケージ類
+今回使用しているパッケージ類
 ---
 ubuntu 22.04 \
 ROS2 humble \
@@ -8,7 +8,7 @@ gazebo harmonic \
 https://gazebosim.org/docs/harmonic/install/ \
 mavros
 
-###gazeboでのシミュレーション時に実行するコマンド
+gazeboでのシミュレーション時に実行するコマンド
 ---
 **1つ目のターミナル**
 
@@ -35,5 +35,5 @@ ros2 launch mavros apm.launch fcu_url:="udp://127.0.0.1:14550@"
 gz sim -v4 -r iris_runway.sdf
 ```
 
-###実機のときに実行するコマンド
+実機のときに実行するコマンド
 ---
