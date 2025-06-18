@@ -1,6 +1,13 @@
 ###今回使用しているパッケージ類
 ---
-#
+ubuntu 22.04 \
+ROS2 humble \
+ardupilot sitl simulation \
+https://ardupilot.org/dev/docs/sitl-with-gazebo.html \
+gazebo harmonic \
+https://gazebosim.org/docs/harmonic/install/ \
+mavros
+
 ###gazeboでのシミュレーション時に実行するコマンド
 ---
 **1つ目のターミナル**
