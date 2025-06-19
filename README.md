@@ -40,6 +40,11 @@ rc 10 1300
 ```bash
 ros2 launch mavros apm.launch fcu_url:="udp://127.0.0.1:14550@"
 ```
+
+**4つ目のターミナル**
+```bash
+gz sim -v4 -r iris_runway.sdf
+```
 もしくは
 ```bash
 cd ~/ardu_ws
@@ -47,11 +52,5 @@ colcon build --packages-up-to ardupilot_gz_bringup
 source install/setup.bash
 ros2 launch ardupilot_gz_bringup iris_runway.launch.py
 ```
-
-**4つ目のターミナル**
-```bash
-gz sim -v4 -r iris_runway.sdf
-```
-
 実機のときに実行するコマンド
 ---
