@@ -35,7 +35,7 @@ class ArucoLandingNode(Node):
         # --- パラメータ定義 ---
         self.landing_marker_id = 102 # あなたの指定したID
         self.marker_length = 0.15
-        self.search_height = 5.0
+        self.search_height = 1.0
         self.centering_tolerance = 0.08
 
         # --- 状態管理変数 ---
@@ -55,7 +55,7 @@ class ArucoLandingNode(Node):
         mavros_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.VOLATILE, history=HistoryPolicy.KEEP_LAST, depth=10)
         self.state_sub = self.create_subscription(State, '/mavros/state', self.state_callback, mavros_qos)
         self.pose_sub = self.create_subscription(PoseStamped, '/mavros/local_position/pose', self.pose_callback, mavros_qos)
-        self.image_sub = self.create_subscription(Image, '/camera/image_raw', self.image_callback, 10)
+        self.image_sub = self.create_subscription(Image, '/camera/image', self.image_callback, 10)
         self.setpoint_pub = self.create_publisher(PoseStamped, '/mavros/setpoint_position/local', 10)
         self.arming_client = self.create_client(CommandBool, '/mavros/cmd/arming')
         self.set_mode_client = self.create_client(SetMode, '/mavros/set_mode')
@@ -119,7 +119,7 @@ class ArucoLandingNode(Node):
                 self.takeoff_client.call_async(CommandTOL.Request(altitude=self.search_height, latitude=float('nan'), longitude=float('nan')))
 
         elif self.mission_state == MissionState.TAKING_OFF:
-            if abs(self.current_pose.pose.position.z - self.search_height) < 1.0:
+            if abs(self.current_pose.pose.position.z - self.search_height) < 0.5:
                 self.get_logger().info("Takeoff complete. Switching to SEARCHING mode.")
                 self.mission_state = MissionState.SEARCHING
 
@@ -128,7 +128,6 @@ class ArucoLandingNode(Node):
 
     # --- 各ミッションのヘルパー関数 ---
     def detect_aruco(self, frame):
-        # (この関数は変更なし)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         corners, ids, _ = aruco.detectMarkers(gray, self.aruco_dict, parameters=self.aruco_params)
         if ids is not None:
@@ -139,7 +138,6 @@ class ArucoLandingNode(Node):
         return None, -1
 
     def center_over_marker(self, tvec):
-        # (この関数は変更なし、ただし着陸ロジックを修正)
         dx, dy = tvec[0], tvec[1]
         if abs(dx) < self.centering_tolerance and abs(dy) < self.centering_tolerance:
             self.get_logger().info("Marker centered. Requesting LAND mode.")
