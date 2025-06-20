@@ -33,10 +33,10 @@ class ArucoLandingNode(Node):
         super().__init__('aruco_landing_node')
 
         # --- パラメータ定義 ---
-        self.landing_marker_id = 102 # あなたの指定したID
-        self.marker_length = 0.15
-        self.search_height = 1.0
-        self.centering_tolerance = 0.08
+        self.landing_marker_id = 100 # あなたの指定したID
+        self.marker_length = 0.5
+        self.search_height = 1.5
+        self.centering_tolerance = 0.3
 
         # --- 状態管理変数 ---
         self.mission_state = MissionState.WAITING_FOR_CONNECTION
@@ -55,8 +55,8 @@ class ArucoLandingNode(Node):
         mavros_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.VOLATILE, history=HistoryPolicy.KEEP_LAST, depth=10)
         self.state_sub = self.create_subscription(State, '/mavros/state', self.state_callback, mavros_qos)
         self.pose_sub = self.create_subscription(PoseStamped, '/mavros/local_position/pose', self.pose_callback, mavros_qos)
-        self.image_sub = self.create_subscription(Image, '/camera/image', self.image_callback, 10)
-        self.setpoint_pub = self.create_publisher(PoseStamped, '/mavros/setpoint_position/local', 10)
+        self.image_sub = self.create_subscription(Image, '/camera/image', self.image_callback, mavros_qos)
+        self.setpoint_pub = self.create_publisher(PoseStamped, '/mavros/setpoint_position/local', mavros_qos)
         self.arming_client = self.create_client(CommandBool, '/mavros/cmd/arming')
         self.set_mode_client = self.create_client(SetMode, '/mavros/set_mode')
         self.takeoff_client = self.create_client(CommandTOL, '/mavros/cmd/takeoff')
@@ -65,7 +65,7 @@ class ArucoLandingNode(Node):
         self.bridge = cv_bridge.CvBridge()
         self.aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_1000)
         self.aruco_params = aruco.DetectorParameters_create()
-        self.camera_matrix = np.array([[600, 0, 320], [0, 600, 240]], dtype=np.float32)
+        self.camera_matrix = np.array([[554.25, 0.0, 320.5],[0.0, 554.25, 240.5],[0.0, 0.0, 1.0]])
         self.dist_coeffs = np.zeros(5, dtype=np.float32)
 
         # --- 司令塔となる制御ループタイマー (10Hz) ---
@@ -98,7 +98,6 @@ class ArucoLandingNode(Node):
         if not self.current_state or not self.current_pose:
             return
 
-        # 状態に応じて、実行するタスクを振り分ける
         if self.mission_state == MissionState.WAITING_FOR_CONNECTION:
             if self.current_state.connected:
                 self.get_logger().info("MAVROS Connected. Proceeding to set mode.")
@@ -126,15 +125,32 @@ class ArucoLandingNode(Node):
         elif self.mission_state == MissionState.SEARCHING:
             self.execute_search_pattern()
 
-    # --- 各ミッションのヘルパー関数 ---
     def detect_aruco(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         corners, ids, _ = aruco.detectMarkers(gray, self.aruco_dict, parameters=self.aruco_params)
+
+        # --- デバッグ用のログ表示を追加 ---
         if ids is not None:
+            # まず、何かしらのマーカーが見つかった場合に、そのIDをすべて表示する
+            # flatten()は、[[102], [3], [50]] のような形を [102, 3, 50] のように見やすくするためのものです
+            self.get_logger().info(f'Found ArUco markers with IDs: {ids.flatten()}')
+
             for i, marker_id in enumerate(ids):
+                # 見つかったIDの中に、探しているIDがあるかチェック
                 if marker_id[0] == self.landing_marker_id:
+                    # 目標のマーカーが見つかったら、そのことを知らせる
+                    self.get_logger().info(f'>>> Target marker {self.landing_marker_id} FOUND! <<<')
+
+                    # ポーズ推定を実行
                     rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers([corners[i]], self.marker_length, self.camera_matrix, self.dist_coeffs)
-                    return tvecs[0][0], ids[i][0]
+                    
+                    # 計算された3D位置ベクトル(tvec)も表示してみる
+                    tvec = tvecs[0][0]
+                    self.get_logger().info(f'    - Position from camera (tvec): x={tvec[0]:.3f}, y={tvec[1]:.3f}, z={tvec[2]:.3f}')
+                    
+                    return tvec, ids[i][0]
+
+        # 何も見つからなかった場合はNoneを返す
         return None, -1
 
     def center_over_marker(self, tvec):
@@ -144,17 +160,36 @@ class ArucoLandingNode(Node):
             self.mission_state = MissionState.LANDING
             self.set_mode_client.call_async(SetMode.Request(custom_mode='LAND'))
         else:
+            # --- ここからがデバッグログを追加した部分 ---
+            
+            # 1. 現在の状態をログに出力
+            current_x = self.current_pose.pose.position.x
+            current_y = self.current_pose.pose.position.y
+            self.get_logger().info(
+                f'Centering... '
+                f'Error(dx, dy)=({dx:+.2f}, {dy:+.2f}), '
+                f'Current(Cx, Cy)=({current_x:.2f}, {current_y:.2f})'
+            )
+
+            # 2. 新しい目標位置を計算
             target_pose = PoseStamped()
             target_pose.header.stamp = self.get_clock().now().to_msg()
             target_pose.header.frame_id = 'map'
-            target_pose.pose.position.x = self.current_pose.pose.position.x + dy
-            target_pose.pose.position.y = self.current_pose.pose.position.y + dx
+            target_pose.pose.position.x = current_x + dx
+            target_pose.pose.position.y = current_y - dy 
             target_pose.pose.position.z = self.search_height
             target_pose.pose.orientation = self.current_pose.pose.orientation
+            
+            # 3. 計算された目標値をログに出力
+            new_target_x = target_pose.pose.position.x
+            new_target_y = target_pose.pose.position.y
+            self.get_logger().info(
+                f'          -> New Target(Tx, Ty)=({new_target_x:.2f}, {new_target_y:.2f}). Publishing...'
+            )
+
             self.setpoint_pub.publish(target_pose)
 
     def execute_search_pattern(self):
-        # (この関数は変更なし)
         if not self.takeoff_position: return
         x = self.takeoff_position.pose.position.x + self.search_radius * math.cos(self.search_angle)
         y = self.takeoff_position.pose.position.y + self.search_radius * math.sin(self.search_angle)
@@ -176,7 +211,7 @@ class ArucoLandingNode(Node):
                 self.mission_state = MissionState.LANDING
                 self.set_mode_client.call_async(SetMode.Request(custom_mode='LAND'))
 
-# --- main関数 (シンプルで確実な形) ---
+# --- メイン関数 ---
 def main(args=None):
     rclpy.init(args=args)
     try:
