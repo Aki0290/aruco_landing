@@ -38,6 +38,8 @@ cd ~/ardu_ws
 colcon build --packages-up-to ardupilot_gz_bringup
 source install/setup.bash
 ```
+#### ArUco Marker Integration
+To support autonomous landing on an ArUco marker, We modified the existing SDF files used in the ArduPilot with Gazebo SITL simulation. Specifically, we added an ArUco marker model into the simulation world by editing the .sdf file of the world.
 
 ## 2. Simulation in Gazebo
 ---
