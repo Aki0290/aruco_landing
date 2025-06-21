@@ -21,6 +21,9 @@ https://gazebosim.org/docs/harmonic/install/
 mavros
 https://ardupilot.org/dev/docs/ros-install.html#installing-mavros 
 
+## Overview
+This package enables autonomous landing on an ArUco marker, as required in the drone mission of the ERC competition.
+
 ## 1.Setup
 ### build the packages in your ws
 #### aruco_landing package
