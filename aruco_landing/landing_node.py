@@ -33,10 +33,10 @@ class ArucoLandingNode(Node):
         super().__init__('aruco_landing_node')
 
         # --- パラメータ定義 ---
-        self.landing_marker_id = 100 # あなたの指定したID
-        self.marker_length = 0.5
-        self.search_height = 1.5
-        self.centering_tolerance = 0.3
+        self.landing_marker_id = 102 # あなたの指定したID
+        self.marker_length = 0.15
+        self.search_height = 2.0
+        self.centering_tolerance = 0.1
 
         # --- 状態管理変数 ---
         self.mission_state = MissionState.WAITING_FOR_CONNECTION
@@ -63,7 +63,7 @@ class ArucoLandingNode(Node):
         
         # --- OpenCVセットアップ ---
         self.bridge = cv_bridge.CvBridge()
-        self.aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_1000)
+        self.aruco_dict = aruco.getPredefinedDictionary(cv2.aruco.DICT_ARUCO_ORIGINAL)
         self.aruco_params = aruco.DetectorParameters_create()
         self.camera_matrix = np.array([[554.25, 0.0, 320.5],[0.0, 554.25, 240.5],[0.0, 0.0, 1.0]])
         self.dist_coeffs = np.zeros(5, dtype=np.float32)
@@ -175,8 +175,8 @@ class ArucoLandingNode(Node):
             target_pose = PoseStamped()
             target_pose.header.stamp = self.get_clock().now().to_msg()
             target_pose.header.frame_id = 'map'
-            target_pose.pose.position.x = current_x + dx
-            target_pose.pose.position.y = current_y - dy 
+            target_pose.pose.position.x = current_x - dx
+            target_pose.pose.position.y = current_y + dy 
             target_pose.pose.position.z = self.search_height
             target_pose.pose.orientation = self.current_pose.pose.orientation
             
