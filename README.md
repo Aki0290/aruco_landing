@@ -78,3 +78,21 @@ ros2 run aruco_landing landing_node
 ## 3. Testing in the real world
 
 ###
+
+```
+    <include>
+        <name>aruco_tag1</name>
+        <pose>100 1.0 0.02 0 0 0</pose>
+        <uri>
+        model://aruco_tag_model102
+        </uri>
+    </include>
+    
+    <include>
+        <name>aruco_tag2</name>
+        <pose>100 0 0.02 0 0 0</pose>
+        <uri>
+        model://aruco_tag_model101
+        </uri>
+    </include>
+````
