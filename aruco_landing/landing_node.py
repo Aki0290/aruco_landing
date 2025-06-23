@@ -35,7 +35,7 @@ class ArucoLandingNode(Node):
         # --- パラメータ定義 ---
         self.landing_marker_id = 102 # あなたの指定したID
         self.marker_length = 0.15
-        self.search_height = 2.0
+        self.search_height = 1.0
         self.centering_tolerance = 0.1
 
         # --- 状態管理変数 ---
@@ -175,8 +175,8 @@ class ArucoLandingNode(Node):
             target_pose = PoseStamped()
             target_pose.header.stamp = self.get_clock().now().to_msg()
             target_pose.header.frame_id = 'map'
-            target_pose.pose.position.x = current_x - dx
-            target_pose.pose.position.y = current_y + dy 
+            target_pose.pose.position.x = current_x + dx
+            target_pose.pose.position.y = current_y - dy 
             target_pose.pose.position.z = self.search_height
             target_pose.pose.orientation = self.current_pose.pose.orientation
             
