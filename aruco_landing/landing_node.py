@@ -36,7 +36,7 @@ class ArucoLandingNode(Node):
         # --- パラメータ定義 ---
         self.landing_marker_id = 102
         self.marker_length = 0.15
-        self.search_height = 0.5
+        self.search_height = 0.8
         self.centering_tolerance = 0.1
 
         # --- 状態管理変数 ---
@@ -66,13 +66,13 @@ class ArucoLandingNode(Node):
         self.bridge = cv_bridge.CvBridge()
         self.aruco_dict = aruco.getPredefinedDictionary(cv2.aruco.DICT_ARUCO_ORIGINAL)
         self.aruco_params = aruco.DetectorParameters_create()
-        self.camera_matrix = np.array([[332.5, 0.0, 320],[0.0, 332.5, 240],[0.0, 0.0, 2.0]])
+        self.camera_matrix = np.array([[205.46, 0.0, 320],[0.0, 205.46, 240],[0.0, 0.0, 2.0]])
         self.dist_coeffs = np.zeros(5, dtype=np.float32)
 
         ### <<< 追加/変更部分 ここから >>> ###
 
         # --- 黄緑色の物体検知用パラメータ ---
-        self.hsv_lower_green = np.array([35, 100, 100])
+        self.hsv_lower_green = np.array([35, 50, 50])
         self.hsv_upper_green = np.array([85, 255, 255])
         self.min_object_area = 500
         
