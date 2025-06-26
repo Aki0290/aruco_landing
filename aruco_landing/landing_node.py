@@ -92,7 +92,6 @@ class ArucoLandingNode(Node):
         # このファイルは常に新しいので、削除処理は不要
         self.get_logger().info(f"Log file for this run: '{self.object_log_filename}'")
 
-
         # 発見した物体のワールド座標を保存するリスト（重複検知用）
         self.detected_objects_positions = []
         # 発見した物体のカメラ座標を保存するリスト（ファイル書き出し用）
