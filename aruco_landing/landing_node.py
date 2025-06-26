@@ -127,14 +127,10 @@ class ArucoLandingNode(Node):
                     self.mission_state = MissionState.CENTERING
                 self.center_over_marker(tvec)
         
-        ### <<< 追加/変更部分 ここから >>> ###
-        
         # --- 黄緑色の物体検知と位置保存ロジック ---
         # ミッションが探索段階以降で、かつ、まだ最大数まで発見していない場合のみ実行
         if self.mission_state >= MissionState.SEARCHING and len(self.detected_objects_positions) < self.max_objects_to_detect:
             self.detect_and_manage_objects(frame)
-            
-        ### <<< 追加/変更部分 ここまで >>> ###
 
     def control_loop(self):
         if not self.current_state or not self.current_pose:
