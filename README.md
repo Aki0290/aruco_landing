@@ -1,5 +1,5 @@
-# ERC2025 drone autonomous navigation
-ERC2025 Drone Navigation Package
+# ERC2025 UAV Autonomous Navigation
+ERC2025 UAV Navigation Package
 
 ## Environment
 
