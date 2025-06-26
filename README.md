@@ -12,7 +12,7 @@ ERC2025 Drone Navigation Package
 If you did not install these environment, please access these links below and install. 
 
 ardupilot sitl simulation \
-https://ardupilot.org/dev/docs/ros2.html 
+https://ardupilot.org/dev/docs/ros2.html \
 https://ardupilot.org/dev/docs/ros2-gazebo.html 
 
 gazebo harmonic 
