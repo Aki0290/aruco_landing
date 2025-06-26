@@ -1,6 +1,8 @@
 # ERC2025 UAV Autonomous Navigation
 ERC2025 UAV Navigation Package
 
+![drone](https://github.com/user-attachments/assets/2e216aca-de09-4890-a808-00fb712153e1)
+
 ## Environment
 
 | - | version |
