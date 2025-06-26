@@ -7,6 +7,7 @@ import time
 import math
 from enum import IntEnum
 import os
+from datetime import datetime
 
 import cv2
 import numpy as np
@@ -36,7 +37,7 @@ class ArucoLandingNode(Node):
         # --- パラメータ定義 ---
         self.landing_marker_id = 102
         self.marker_length = 0.15
-        self.search_height = 0.8
+        self.search_height = 1.0
         self.centering_tolerance = 0.1
 
         # --- 状態管理変数 ---
@@ -85,12 +86,11 @@ class ArucoLandingNode(Node):
         self.detected_objects_positions = []
         
         # 保存するファイル名
-        self.object_log_filename = "detected_objects_locations.txt"
+        current_time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.object_log_filename = f"detected_objects_{current_time_str}.txt"
         
-        # 起動時に以前のログファイルを削除
-        if os.path.exists(self.object_log_filename):
-            os.remove(self.object_log_filename)
-        self.get_logger().info(f"'{self.object_log_filename}' will be created upon object detection.")
+        # このファイルは常に新しいので、削除処理は不要
+        self.get_logger().info(f"Log file for this run: '{self.object_log_filename}'")
 
 
         # 発見した物体のワールド座標を保存するリスト（重複検知用）
