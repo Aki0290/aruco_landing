@@ -79,7 +79,7 @@ class ArucoLandingNode(Node):
         
         # --- 複数物体管理用パラメータ ---
         # 検出する物体の最大数
-        self.max_objects_to_detect = 20
+        self.max_objects_to_detect = 3
         # 新しい物体と既存の物体を区別するための最小距離（メートル）
         self.min_distance_between_objects = 0.5
         # 発見した物体のワールド座標を保存するリスト
