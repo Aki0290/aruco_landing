@@ -5,7 +5,9 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 import threading
 import time
 import math
-from enum import Enum
+from enum import IntEnum
+import os
+from datetime import datetime
 
 import cv2
 import numpy as np
@@ -18,7 +20,7 @@ from mavros_msgs.msg import State
 from mavros_msgs.srv import CommandBool, SetMode, CommandTOL
 
 # ミッションの状態を明確に管理するためのEnum
-class MissionState(Enum):
+class MissionState(IntEnum):
     WAITING_FOR_CONNECTION = 0
     SETTING_MODE = 1
     ARMING = 2
@@ -33,7 +35,7 @@ class ArucoLandingNode(Node):
         super().__init__('aruco_landing_node')
 
         # --- パラメータ定義 ---
-        self.landing_marker_id = 102 # あなたの指定したID
+        self.landing_marker_id = 102
         self.marker_length = 0.15
         self.search_height = 1.0
         self.centering_tolerance = 0.1
@@ -46,9 +48,9 @@ class ArucoLandingNode(Node):
         
         # --- 探索ロジック用変数 ---
         self.search_radius = 0.5
-        self.max_search_radius = 3.2
+        self.max_search_radius = 3.5
         self.search_angle = 0.0
-        self.search_radius_step = 0.3
+        self.search_radius_step = 0.5
         self.search_angle_step = math.radians(1)
 
         # --- ROS 2セットアップ ---
@@ -65,14 +67,40 @@ class ArucoLandingNode(Node):
         self.bridge = cv_bridge.CvBridge()
         self.aruco_dict = aruco.getPredefinedDictionary(cv2.aruco.DICT_ARUCO_ORIGINAL)
         self.aruco_params = aruco.DetectorParameters_create()
-        self.camera_matrix = np.array([[554.25, 0.0, 320.5],[0.0, 554.25, 240.5],[0.0, 0.0, 1.0]])
+        self.camera_matrix = np.array([[205.46, 0.0, 320],[0.0, 205.46, 240],[0.0, 0.0, 2.0]])
         self.dist_coeffs = np.zeros(5, dtype=np.float32)
 
-        # --- 司令塔となる制御ループタイマー (10Hz) ---
+        ### <<< 追加/変更部分 ここから >>> ###
+
+        # --- 黄緑色の物体検知用パラメータ ---
+        self.hsv_lower_green = np.array([35, 50, 50])
+        self.hsv_upper_green = np.array([85, 255, 255])
+        self.min_object_area = 500
+        
+        # --- 複数物体管理用パラメータ ---
+        # 検出する物体の最大数
+        self.max_objects_to_detect = 3
+        # 新しい物体と既存の物体を区別するための最小距離（メートル）
+        self.min_distance_between_objects = 0.5
+        # 発見した物体のワールド座標を保存するリスト
+        self.detected_objects_positions = []
+        
+        # 保存するファイル名
+        current_time_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.object_log_filename = f"detected_objects_{current_time_str}.txt"
+        
+        # このファイルは常に新しいので、削除処理は不要
+        self.get_logger().info(f"Log file for this run: '{self.object_log_filename}'")
+
+        # 発見した物体のワールド座標を保存するリスト（重複検知用）
+        self.detected_objects_positions = []
+        # 発見した物体のカメラ座標を保存するリスト（ファイル書き出し用）
+        self.detected_objects_camera_coords = []
+    
+
         self.control_timer = self.create_timer(0.1, self.control_loop)
         self.get_logger().info('Aruco Landing Node started. Waiting for MAVROS connection...')
 
-    # --- コールバック関数 (外部からのイベントを受け取るだけ) ---
     def state_callback(self, msg):
         self.current_state = msg
 
@@ -80,20 +108,29 @@ class ArucoLandingNode(Node):
         self.current_pose = msg
     
     def image_callback(self, msg):
-        if self.mission_state not in [MissionState.SEARCHING, MissionState.CENTERING]: return
-        
+        if self.current_pose is None or self.takeoff_position is None:
+            return
+
         try:
             frame = self.bridge.imgmsg_to_cv2(msg, 'bgr8')
+        except cv_bridge.CvBridgeError as e:
+            self.get_logger().error(f'CV Bridge Error: {e}')
+            return
+
+        # --- ArUcoマーカー着陸ロジック（変更なし） ---
+        if self.mission_state in [MissionState.SEARCHING, MissionState.CENTERING]:
             tvec, detected_id = self.detect_aruco(frame)
             if detected_id == self.landing_marker_id:
                 if self.mission_state == MissionState.SEARCHING:
                     self.get_logger().info(f'Landing marker {self.landing_marker_id} found! Switching to CENTERING mode.')
                     self.mission_state = MissionState.CENTERING
                 self.center_over_marker(tvec)
-        except cv_bridge.CvBridgeError as e:
-            self.get_logger().error(f'CV Bridge Error: {e}')
+        
+        # --- 黄緑色の物体検知と位置保存ロジック ---
+        # ミッションが探索段階以降で、かつ、まだ最大数まで発見していない場合のみ実行
+        if self.mission_state >= MissionState.SEARCHING and len(self.detected_objects_positions) < self.max_objects_to_detect:
+            self.detect_and_manage_objects(frame)
 
-    # --- 司令塔：制御ループ ---
     def control_loop(self):
         if not self.current_state or not self.current_pose:
             return
@@ -118,7 +155,7 @@ class ArucoLandingNode(Node):
                 self.takeoff_client.call_async(CommandTOL.Request(altitude=self.search_height, latitude=float('nan'), longitude=float('nan')))
 
         elif self.mission_state == MissionState.TAKING_OFF:
-            if abs(self.current_pose.pose.position.z - self.search_height) < 0.5:
+            if abs(self.current_pose.pose.position.z - self.search_height) < 0.3:
                 self.get_logger().info("Takeoff complete. Switching to SEARCHING mode.")
                 self.mission_state = MissionState.SEARCHING
 
@@ -129,28 +166,16 @@ class ArucoLandingNode(Node):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         corners, ids, _ = aruco.detectMarkers(gray, self.aruco_dict, parameters=self.aruco_params)
 
-        # --- デバッグ用のログ表示を追加 ---
         if ids is not None:
-            # まず、何かしらのマーカーが見つかった場合に、そのIDをすべて表示する
-            # flatten()は、[[102], [3], [50]] のような形を [102, 3, 50] のように見やすくするためのものです
-            self.get_logger().info(f'Found ArUco markers with IDs: {ids.flatten()}')
-
+            self.get_logger().info(f'Found ArUco markers with IDs: {ids.flatten()}', throttle_duration_sec=1.0)
             for i, marker_id in enumerate(ids):
-                # 見つかったIDの中に、探しているIDがあるかチェック
                 if marker_id[0] == self.landing_marker_id:
-                    # 目標のマーカーが見つかったら、そのことを知らせる
                     self.get_logger().info(f'>>> Target marker {self.landing_marker_id} FOUND! <<<')
-
-                    # ポーズ推定を実行
                     rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers([corners[i]], self.marker_length, self.camera_matrix, self.dist_coeffs)
-                    
-                    # 計算された3D位置ベクトル(tvec)も表示してみる
                     tvec = tvecs[0][0]
                     self.get_logger().info(f'    - Position from camera (tvec): x={tvec[0]:.3f}, y={tvec[1]:.3f}, z={tvec[2]:.3f}')
-                    
                     return tvec, ids[i][0]
 
-        # 何も見つからなかった場合はNoneを返す
         return None, -1
 
     def center_over_marker(self, tvec):
@@ -160,18 +185,11 @@ class ArucoLandingNode(Node):
             self.mission_state = MissionState.LANDING
             self.set_mode_client.call_async(SetMode.Request(custom_mode='LAND'))
         else:
-            # --- ここからがデバッグログを追加した部分 ---
-            
-            # 1. 現在の状態をログに出力
             current_x = self.current_pose.pose.position.x
             current_y = self.current_pose.pose.position.y
             self.get_logger().info(
-                f'Centering... '
-                f'Error(dx, dy)=({dx:+.2f}, {dy:+.2f}), '
-                f'Current(Cx, Cy)=({current_x:.2f}, {current_y:.2f})'
+                f'Centering... Error(dx, dy)=({dx:+.2f}, {dy:+.2f})', throttle_duration_sec=1.0
             )
-
-            # 2. 新しい目標位置を計算
             target_pose = PoseStamped()
             target_pose.header.stamp = self.get_clock().now().to_msg()
             target_pose.header.frame_id = 'map'
@@ -179,14 +197,6 @@ class ArucoLandingNode(Node):
             target_pose.pose.position.y = current_y - dy 
             target_pose.pose.position.z = self.search_height
             target_pose.pose.orientation = self.current_pose.pose.orientation
-            
-            # 3. 計算された目標値をログに出力
-            new_target_x = target_pose.pose.position.x
-            new_target_y = target_pose.pose.position.y
-            self.get_logger().info(
-                f'          -> New Target(Tx, Ty)=({new_target_x:.2f}, {new_target_y:.2f}). Publishing...'
-            )
-
             self.setpoint_pub.publish(target_pose)
 
     def execute_search_pattern(self):
@@ -211,15 +221,126 @@ class ArucoLandingNode(Node):
                 self.mission_state = MissionState.LANDING
                 self.set_mode_client.call_async(SetMode.Request(custom_mode='LAND'))
 
-# --- メイン関数 ---
+
+    def detect_and_manage_objects(self, frame):
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, self.hsv_lower_green, self.hsv_upper_green)
+        _, contours, _ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
+        valid_contours = [cnt for cnt in contours if cv2.contourArea(cnt) > self.min_object_area]
+        
+        if not valid_contours:
+            return
+
+        new_object_found = False
+        for contour in valid_contours:
+            if len(self.detected_objects_positions) >= self.max_objects_to_detect:
+                break
+            
+            M = cv2.moments(contour)
+            if M["m00"] == 0: continue
+            center_u = int(M["m10"] / M["m00"])
+            center_v = int(M["m01"] / M["m00"])
+
+            # 座標変換を実行
+            camera_coords, world_coords = self.transform_pixel_to_frames(center_u, center_v)
+            
+            # 重複検知はワールド座標で行う
+            is_new = True
+            for saved_pos in self.detected_objects_positions:
+                dist = math.sqrt((world_coords[0] - saved_pos[0])**2 + (world_coords[1] - saved_pos[1])**2)
+                if dist < self.min_distance_between_objects:
+                    is_new = False
+                    break
+            
+            # 新しい物体であれば、ワールド座標とカメラ座標の両方を保存
+            if is_new:
+                self.get_logger().info(f'>>> New green object DETECTED! Total: {len(self.detected_objects_positions) + 1} <<<')
+                self.detected_objects_positions.append(world_coords)
+                self.detected_objects_camera_coords.append(camera_coords)
+                new_object_found = True
+
+        if new_object_found:
+            self.update_log_file()
+            if len(self.detected_objects_positions) == self.max_objects_to_detect:
+                self.get_logger().info(f'Found all {self.max_objects_to_detect} objects. Stopping search.')
+        
+    def transform_pixel_to_frames(self, u, v):
+        """ピクセル座標(u,v)をカメラ座標とワールド座標に変換する"""
+        # --- カメラ座標系での位置 (Xc, Yc, Zc) を計算 ---
+        Zc = self.current_pose.pose.position.z
+        fx = self.camera_matrix[0, 0]
+        fy = self.camera_matrix[1, 1]
+        cx = self.camera_matrix[0, 2]
+        cy = self.camera_matrix[1, 2]
+        
+        Xc = (u - cx) * Zc / fx
+        Yc = (v - cy) * Zc / fy
+        camera_coords = (Xc, Yc, Zc)
+
+        # --- ワールド座標系での位置 (x, y) を計算 ---
+        yaw = self.get_yaw_from_pose(self.current_pose.pose)
+        
+        # 「カメラ映像の上が機体の前方」と仮定した変換
+        dx = -Yc
+        dy = -Xc
+
+        world_offset_x = dx * math.cos(yaw) - dy * math.sin(yaw)
+        world_offset_y = dx * math.sin(yaw) + dy * math.cos(yaw)
+
+        object_world_x = self.current_pose.pose.position.x + world_offset_x
+        object_world_y = self.current_pose.pose.position.y + world_offset_y
+        world_coords = (object_world_x, object_world_y)
+        
+        return camera_coords, world_coords
+
+
+    def update_log_file(self):
+        """発見した全オブジェクトの、離陸地点を原点とするワールド座標をファイルに書き出す"""
+        try:
+            with open(self.object_log_filename, 'w') as f:
+                f.write(f"# Detected Objects: {len(self.detected_objects_positions)} / {self.max_objects_to_detect}\n")
+                f.write(f"# Coordinates are in the world frame, relative to the takeoff point (meters).\n\n")
+
+                # 離陸地点の座標を取得
+                takeoff_x = self.takeoff_position.pose.position.x
+                takeoff_y = self.takeoff_position.pose.position.y
+
+                # 保存されている各オブジェクトの「絶対ワールド座標」を取り出す
+                for i, pos in enumerate(self.detected_objects_positions):
+                    # pos は (object_world_x, object_world_y) のタプル
+
+                    # 絶対座標から離陸地点の座標を引いて、相対座標を計算
+                    relative_x = pos[0] - takeoff_x
+                    relative_y = pos[1] - takeoff_y
+                    
+                    f.write(f"[Object {i+1}]\n")
+                    f.write(f"x: {relative_x:.4f}\n")
+                    f.write(f"y: {relative_y:.4f}\n\n")
+            
+            self.get_logger().info(f"Updated object locations in '{self.object_log_filename}'.")
+        except IOError as e:
+            self.get_logger().error(f"Could not write to file: {e}")
+        
+    def get_yaw_from_pose(self, pose):
+        orientation = pose.orientation
+        q_x, q_y, q_z, q_w = orientation.x, orientation.y, orientation.z, orientation.w
+        t3 = +2.0 * (q_w * q_z + q_x * q_y)
+        t4 = +1.0 - 2.0 * (q_y * q_y + q_z * q_z)
+        yaw_z = math.atan2(t3, t4)
+        return yaw_z
+
 def main(args=None):
     rclpy.init(args=args)
+    node = None
     try:
         node = ArucoLandingNode()
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
+        if node:
+            node.destroy_node()
         rclpy.shutdown()
 
 if __name__ == '__main__':
