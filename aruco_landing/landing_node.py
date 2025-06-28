@@ -8,6 +8,7 @@ import math
 from enum import IntEnum
 import os
 from datetime import datetime
+from sensor_msgs.msg import Image, CameraInfo
 
 import cv2
 import numpy as np
@@ -57,7 +58,7 @@ class ArucoLandingNode(Node):
         mavros_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.VOLATILE, history=HistoryPolicy.KEEP_LAST, depth=10)
         self.state_sub = self.create_subscription(State, '/mavros/state', self.state_callback, mavros_qos)
         self.pose_sub = self.create_subscription(PoseStamped, '/mavros/local_position/pose', self.pose_callback, mavros_qos)
-        self.image_sub = self.create_subscription(Image, '/camera/image', self.image_callback, mavros_qos)
+        self.image_sub = self.create_subscription(Image, '/camera/color/image_raw', self.image_callback, mavros_qos)
         self.setpoint_pub = self.create_publisher(PoseStamped, '/mavros/setpoint_position/local', mavros_qos)
         self.arming_client = self.create_client(CommandBool, '/mavros/cmd/arming')
         self.set_mode_client = self.create_client(SetMode, '/mavros/set_mode')
@@ -69,8 +70,17 @@ class ArucoLandingNode(Node):
         self.aruco_params = aruco.DetectorParameters_create()
         self.camera_matrix = np.array([[205.46, 0.0, 320],[0.0, 205.46, 240],[0.0, 0.0, 2.0]])
         self.dist_coeffs = np.zeros(5, dtype=np.float32)
-
-        ### <<< 追加/変更部分 ここから >>> ###
+        self.camera_matrix = None
+        self.dist_coeffs = None
+        self.camera_info_received = False
+    
+    	# CameraInfoトピックを購読するためのSubscriptionを追加
+    	# トピック名はrealsense-rosのデフォルトに合わせて'/camera/color/camera_info'に設定
+        self.camera_info_sub = self.create_subscription(
+    		CameraInfo,
+        	'/camera/color/camera_info',
+        	self.camera_info_callback,
+        	10)
 
         # --- 黄緑色の物体検知用パラメータ ---
         self.hsv_lower_green = np.array([35, 50, 50])
@@ -100,6 +110,23 @@ class ArucoLandingNode(Node):
 
         self.control_timer = self.create_timer(0.1, self.control_loop)
         self.get_logger().info('Aruco Landing Node started. Waiting for MAVROS connection...')
+        
+    # クラス内に以下の2つのメソッドを追加
+    def camera_info_callback(self, msg):
+        # 最初の1回だけカメラパラメータを取得して、購読を停止する
+        if not self.camera_info_received:
+            self.camera_matrix = np.array(msg.k).reshape(3, 3)
+            self.dist_coeffs = np.array(msg.d)
+            self.camera_info_received = True
+            
+            self.get_logger().info('Camera info received and set successfully!')
+            self.get_logger().info(f'Camera Matrix:\n{self.camera_matrix}')
+	
+	    # このコールバックはもう不要なので、タイマーを使って安全に購読を停止
+            self.create_timer(0.1, self.destroy_camera_info_sub)
+
+    def destroy_camera_info_sub(self):
+        self.destroy_subscription(self.camera_info_sub)
 
     def state_callback(self, msg):
         self.current_state = msg
@@ -108,6 +135,10 @@ class ArucoLandingNode(Node):
         self.current_pose = msg
     
     def image_callback(self, msg):
+    	# カメラ情報(camera_matrix)を受け取るまで何もしない
+        if not self.camera_info_received:
+            return
+            
         if self.current_pose is None or self.takeoff_position is None:
             return
 
