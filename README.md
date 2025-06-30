@@ -212,3 +212,186 @@ Your setup is now complete! The next time you power on the Raspberry Pi, your en
 > # View the live log output of your service (very useful for debugging!)
 > sudo journalctl -u drone.service -f
 > ```
+>
+> ## 5. Adding Custom Models to the Gazebo World
+
+The default ArduPilot Gazebo world does not contain the specific ArUco markers or probes required for the competition mission. This section explains how to create and add these custom models to the simulation environment.
+
+While you can find many pre-made models on [Gazebo Fuel](https://app.gazebosim.org/fuel), the models for this project were created manually. For details on how Gazebo worlds are structured, see the [official documentation](https://gazebosim.org/docs/harmonic/sdf_worlds).
+
+The two custom models we will add are:
+1.  **ArUco Markers:** For takeoff (ID 101) and landing (ID 102), as per competition rules. You can generate marker images at this [ArUco Marker Generator](https://aruco-gen.netlify.app/).
+2.  **Green Probes:** A lime-green cylinder for the object detection task.
+
+### 5.1. Creating the ArUco Marker Model
+
+This process defines a flat plane with your ArUco marker image applied as a texture.
+
+1.  First, create the necessary directory structure and files for the ArUco marker model.
+
+    ```bash
+    # Navigate to the models directory in your ardupilot_gazebo package
+    cd ~/ardu_ws/src/ardupilot_gazebo/models
+
+    # Create the full directory path for the model and its texture
+    mkdir -p aruco_tag_model101/materials/textures
+
+    # Go into the model directory and create the config/SDF files
+    cd aruco_tag_model101
+    touch model.config model.sdf
+    ```
+
+2.  > [!NOTE]
+    > You must generate an ArUco marker image (e.g., using the generator linked above) and save it as `aruco_101.png` inside the `~/ardu_ws/src/ardupilot_gazebo/models/aruco_tag_model101/materials/textures/` directory.
+
+3.  Open `model.config` with a text editor and add the following content.
+
+    ```xml
+    <?xml version="1.0"?>
+    <model>
+      <name>Aruco Marker (ID 101)</name>
+      <version>1.0</version>
+      <sdf version="1.9">model.sdf</sdf>
+      <author>
+        <name>Your Name</name>
+        <email>your@email.com</email>
+      </author>
+      <description>An ArUco marker with ID 101 for the ERC competition.</description>
+    </model>
+    ```
+
+4.  Next, open `model.sdf` and add the following content to define the marker's appearance.
+
+    ```xml
+    <?xml version="1.0"?>
+    <sdf version="1.9">
+      <model name="aruco_marker_101">
+        <static>true</static>
+        <link name="aruco_link">
+          <visual name="aruco_visual">
+            <geometry>
+              <plane>
+                <normal>0 0 1</normal>
+                <size>0.15 0.15</size>
+              </plane>
+            </geometry>
+            <material>
+              <pbr>
+                <metal>
+                  <albedo_map>model://aruco_tag_model101/materials/textures/aruco_101.png</albedo_map>
+                </metal>
+              </pbr>
+            </material>
+          </visual>
+        </link>
+      </model>
+    </sdf>
+    ```
+    > Repeat this entire process for marker ID 102 by creating a new `aruco_tag_model102` directory and using an `aruco_102.png` image.
+
+### 5.2. Creating the Green Probe Model
+
+Now, create the model for the green cylindrical probe.
+
+1.  Create the directory and files for the probe model.
+    ```bash
+    # Navigate back to the main models directory
+    cd ~/ardu_ws/src/ardupilot_gazebo/models
+
+    # Create the directory and files
+    mkdir probes
+    cd probes
+    touch model.config model.sdf
+    ```
+
+2.  Open `model.config` and add the following:
+    ```xml
+    <?xml version="1.0"?>
+    <model>
+      <name>Green Probe Cylinder</name>
+      <version>1.0</version>
+      <sdf version="1.7">model.sdf</sdf>
+      <author>
+        <name>Your Name</name>
+        <email>your@email.com</email>
+      </author>
+      <description>A simple green cylinder for object detection testing.</description>
+    </model>
+    ```
+
+3.  Open `model.sdf` and add the code for the cylinder's shape and color.
+    ```xml
+    <?xml version="1.0"?>
+    <sdf version="1.7">
+      <model name="green_cylinder">
+        <static>true</static>
+        <link name="link">
+          <collision name="collision">
+            <geometry>
+              <cylinder>
+                <radius>0.03</radius>
+                <length>0.2</length>
+              </cylinder>
+            </geometry>
+          </collision>
+          <visual name="visual">
+            <geometry>
+              <cylinder>
+                <radius>0.03</radius>
+                <length>0.2</length>
+              </cylinder>
+            </geometry>
+            <material>
+              <diffuse>0.3 0.8 0.1 1.0</diffuse>
+              <ambient>0.3 0.8 0.1 1.0</ambient>
+            </material>
+          </visual>
+        </link>
+      </model>
+    </sdf>
+    ```
+
+### 5.3. Placing the Models in the World
+
+Finally, include the newly created models in your world file.
+
+1.  Open your world file with a text editor.
+    ```bash
+    nano ~/ardu_ws/src/ardupilot_gz/ardupilot_gz_gazebo/worlds/iris_runway.sdf
+    ```
+2.  Add the following `<include>` blocks inside the main `<world>` tags to place the models. You can copy these blocks to add multiple objects, but make sure each has a unique `<name>`.
+
+    ```xml
+    <include>
+      <name>takeoff_marker</name>
+      <uri>model://aruco_tag_model101</uri>
+      <pose>0 0 0.01 0 0 0</pose>
+    </include>
+
+    <include>
+      <name>landing_marker</name>
+      <uri>model://aruco_tag_model102</uri>
+      <pose>5 5 0.01 0 0 0</pose>
+    </include>
+
+    <include>
+      <name>green_cylinder_1</name>
+      <uri>model://probes</uri>
+      <pose>1.5 1.5 0.1 0 1.5708 0</pose> </include>
+
+    <include>
+      <name>green_cylinder_2</name>
+      <uri>model://probes</uri>
+      <pose>-1.5 1.5 0.1 0 1.5708 0</pose> </include>
+
+    <include>
+      <name>green_cylinder_3</name>
+      <uri>model://probes</uri>
+      <pose>0.5 2.5 0.1 0 1.5708 0</pose> </include>
+    ```
+
+After completing these steps, rebuild your ArduPilot workspace to ensure Gazebo can find the new models.
+```bash
+cd ~/ardu_ws
+colcon build --packages-select ardupilot_gazebo
+```
