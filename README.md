@@ -5,91 +5,6 @@ ERC2025 UAV Navigation Package
 
 ## Environment
 
-| - | version |
-|------|------------|
-| Drone | PFM Zephyr |
-| OS  | Ubuntu22.04 |
-| ROS | ROS2 Humble |
-
-If you did not install these environment, please access these links below and install. 
-
-ardupilot sitl simulation \
-https://ardupilot.org/dev/docs/ros2.html \
-https://ardupilot.org/dev/docs/ros2-gazebo.html 
-
-gazebo harmonic 
-https://gazebosim.org/docs/harmonic/install/ 
-
-mavros
-https://ardupilot.org/dev/docs/ros-install.html#installing-mavros 
-
-## Overview
-This package enables autonomous landing on an ArUco marker, as required in the drone mission of the ERC competition.
-
-## 1.Setup
-### build the packages in your ws
-#### aruco_landing package
-```
-cd ros2_ws
-colcon build --packages-select aruco_landing
-source ~/ros2_ws/install/setup.bash
-```
-#### ardupilot ROS2 with SITL in GAZEBO package
-```
-cd ~/ardu_ws
-colcon build --packages-up-to ardupilot_gz_bringup
-source install/setup.bash
-```
-#### ArUco Marker Integration
-To support autonomous landing on an ArUco marker, We modified the existing SDF files used in the ArduPilot with Gazebo SITL simulation. Specifically, we added an ArUco marker model into the simulation world by editing the .sdf file of the world.
-
-## 2. Simulation in Gazebo
----
-> [!IMPORTANT]
-> Plz source bash files before launch .py
-
-### launch ardupilot simulation environment
-
-### 1. launch ardupilot package
-```
-ros2 launch ardupilot_gz_bringup iris_runway.launch.py
-```
-### 2. launch mavproxy
-```
-mavproxy.py --master udp:127.0.0.1:14550  --console --map
-```
-You need to setup these parameters below.
-```
-param set SERVO9_FUNCTION 59
-param set SERVO10_FUNCTION 60
-rc 8 1500
-rc 9 1500
-rc 10 1300
-```
-
-### 3. launch mavros
-```
-ros2 launch mavros apm.launch fcu_url:="udp://127.0.0.1:14550@"
-```
-
-### 4. launch aruco_landing package
-```
-ros2 run aruco_landing landing_node
-```
-
-## 3. Testing in the real world
-
-
-
-
-
-# ERC2025 UAV Autonomous Navigation
-ERC2025 UAV Navigation Package
-
-![drone](https://github.com/user-attachments/assets/2e216aca-de09-4890-a808-00fb712153e1)
-
-## Environment
-
 | Item | Version / Type |
 | :--- | :--- |
 | Drone | PFM Zephyr |
@@ -114,13 +29,22 @@ This package enables a drone to perform autonomous missions as required by the E
 ### Build the Package
 Navigate to your ROS 2 workspace and build the `aruco_landing` package.
 ```bash
-cd ~/ros2_ws
+cd ros2_ws
 colcon build --packages-select aruco_landing
-source install/setup.bash
+source ~/ros2_ws/install/setup.bash
 ```
 *Note: The ArduPilot SITL/Gazebo environment should be built separately in its own workspace (`~/ardu_ws`) according to its documentation.*
 
 ---
+
+#### ardupilot ROS2 with SITL in GAZEBO package
+```
+cd ~/ardu_ws
+colcon build --packages-up-to ardupilot_gz_bringup
+source install/setup.bash
+```
+---
+
 
 ## 2. Running in Simulation
 This section explains how to test the system in a SITL (Software-In-The-Loop) environment.
@@ -146,6 +70,16 @@ ros2 launch ardupilot_gz_bringup iris_runway.launch.py
 MAVProxy is useful for monitoring status and sending manual commands (e.g., `mode guided`, `arm throttle`, `takeoff 1`).
 ```bash
 mavproxy.py --master udp:127.0.0.1:14550 --console --map
+```
+
+You need to setup these parameters below.
+
+```
+param set SERVO9_FUNCTION 59
+param set SERVO10_FUNCTION 60
+rc 8 1500
+rc 9 1500
+rc 10 1300
 ```
 
 #### Terminal 3: Launch Onboard Software
@@ -176,59 +110,105 @@ mavproxy.py --master udpin:<RPi4_IP_Address>:14550
 
 ---
 
-## 4. Autostart on Boot (For Competition)
-For competition use, it is highly recommended to set up the software to launch automatically when the Raspberry Pi is powered on. This is achieved using a `systemd` service.
+## 4. Autostart on Boot (For Competition Use)
 
-### 4.1. Create a Launch Script
-On your Raspberry Pi 4, create a shell script in your home directory.
+For competition or field deployment, the system is designed to launch all necessary software automatically when the Raspberry Pi is powered on. This creates a reliable, "headless" setup that is ready for flight without manual intervention. This is achieved using a standard Linux `systemd` service.
 
-**File:** `~/launch_drone.sh`
-```sh
-#!/bin/bash
+### 4.1. The Launch Script
 
-# Source the ROS 2 environment
-source /opt/ros/humble/setup.bash
+First, a simple shell script is needed to source the correct ROS 2 environments and execute our main launch file.
 
-# Source your workspace
-source ~/ros2_ws/install/setup.bash
+1.  On your Raspberry Pi, create a file named `launch_drone.sh` in your home directory (`~/`).
 
-# Execute the launch file for real-world flight (no 'sim:=true')
-ros2 launch aruco_landing aruco_landing.launch.py
-```
-Make the script executable:
-```bash
-chmod +x ~/launch_drone.sh
-```
+    ```bash
+    nano ~/launch_drone.sh
+    ```
 
-### 4.2. Create a systemd Service File
-Create a new service file in the system directory.
-```bash
-sudo nano /etc/systemd/system/drone.service
-```
-Paste the following content into the file. **Remember to replace `pi` with your actual username.**
+2.  Paste the following content into the file. This script ensures that the ROS environment is correctly sourced before running the launch command for the **real hardware configuration**.
 
-**File:** `/etc/systemd/system/drone.service`
-```ini
-[Unit]
-Description=Drone Autostart Service for ERC2025
-After=network.target
+    **File: `~/launch_drone.sh`**
+    ```sh
+    #!/bin/bash
+    
+    # Source the main ROS 2 environment
+    source /opt/ros/humble/setup.bash
+    
+    # Source your project's workspace
+    source ~/ros2_ws/install/setup.bash
+    
+    # Execute the main launch file. 
+    # No arguments are needed, so it runs in real-flight mode by default.
+    ros2 launch aruco_landing aruco_landing.launch.py
+    ```
 
-[Service]
-User=pi  # <<< REPLACE 'pi' WITH YOUR USERNAME (e.g., akihiro)
-ExecStart=/home/pi/launch_drone.sh  # <<< REPLACE 'pi' WITH YOUR USERNAME
-Restart=on-failure
+3.  Save the file and make it executable.
+    ```bash
+    chmod +x ~/launch_drone.sh
+    ```
 
-[Install]
-WantedBy=multi-user.target
-```
+### 4.2. The `systemd` Service File
 
-### 4.3. Enable the Service
-Run the following commands to enable the service. It will now start automatically every time the Raspberry Pi boots up.
-```bash
-# Reload the systemd manager configuration
-sudo systemctl daemon-reload
+Next, we create a `systemd` service file that tells the operating system to run our script on boot.
 
-# Enable the service to start on boot
-sudo systemctl enable drone.service
-```
-You can check the status of your service anytime with `sudo systemctl status drone.service`.
+1.  Create the service file using a text editor with `sudo` privileges.
+    ```bash
+    sudo nano /etc/systemd/system/drone.service
+    ```
+
+2.  Paste the following content. **Crucially, you must replace `<YOUR_USERNAME>` with your actual username on the Raspberry Pi (e.g., `pi`).**
+
+    **File: `/etc/systemd/system/drone.service`**
+    ```ini
+    [Unit]
+    Description=Drone Autostart Service for ERC2025
+    # Start this service after the network is ready
+    After=network.target
+    
+    [Service]
+    # The user that the script will run as
+    User=<YOUR_USERNAME>
+    
+    # The command to execute
+    ExecStart=/home/<YOUR_USERNAME>/launch_drone.sh
+    
+    # Automatically restart the service if it fails
+    Restart=on-failure
+    
+    [Install]
+    # Enable this service for the default multi-user system state
+    WantedBy=multi-user.target
+    ```
+
+### 4.3. Enabling and Managing the Service
+
+Finally, enable the service to make it persistent across reboots.
+
+1.  Reload the `systemd` manager to recognize the new service file.
+    ```bash
+    sudo systemctl daemon-reload
+    ```
+
+2.  Enable the service to start automatically on every boot.
+    ```bash
+    sudo systemctl enable drone.service
+    ```
+
+Your setup is now complete! The next time you power on the Raspberry Pi, your entire drone software stack will launch automatically.
+
+> [!TIP]
+> **How to check and debug your service:**
+> These commands are essential for troubleshooting your autostart setup.
+>
+> ```bash
+> # Check the current status of your service
+> sudo systemctl status drone.service
+>
+> # Manually start your service without rebooting
+> sudo systemctl start drone.service
+>
+> # Manually stop your service
+> sudo systemctl stop drone.service
+>
+> # View the live log output of your service (very useful for debugging!)
+> sudo journalctl -u drone.service -f
+> ```
