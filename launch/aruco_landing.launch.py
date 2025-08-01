@@ -50,7 +50,7 @@ def launch_setup(context, *args, **kwargs):
             'align_depth.enable': 'false',   # 深度とカラーの位置合わせは無効
             'enable_infra1': 'false',        # 赤外線1は無効
             'enable_infra2': 'false',        # 赤外線2は無効
-            'rgb_camera.profile': '640,480,15', # RGBカメラを640x480, 15fpsに設定
+            'rgb_camera.profile': '640,480,10', # RGBカメラを640x480, 10fpsに設定
         }.items()
     )
 
