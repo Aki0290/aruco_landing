@@ -38,7 +38,7 @@ source ~/ros2_ws/install/setup.bash
 ---
 
 #### ardupilot ROS2 with SITL in GAZEBO package
-```
+```bash
 cd ~/ardu_ws
 colcon build --packages-up-to ardupilot_gz_bringup
 source install/setup.bash
@@ -69,7 +69,7 @@ ros2 launch ardupilot_gz_bringup iris_runway.launch.py
 #### Terminal 2: Launch MAVProxy (Optional but Recommended)
 MAVProxy is useful for monitoring status and sending manual commands (e.g., `mode guided`, `arm throttle`, `takeoff 1`).
 ```bash
-mavproxy.py --master udp:127.0.0.1:14550 --console --map
+mavproxy.py --master=udp:127.0.0.1:14550 --out=udp:127.0.0.1:14551 --console --map
 ```
 
 You need to setup these parameters below.
