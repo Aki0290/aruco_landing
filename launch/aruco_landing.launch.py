@@ -11,6 +11,8 @@ def launch_setup(context, *args, **kwargs):
 
     # --- MAVROSノードの定義 ---
     if sim_mode:
+        # 【修正】14550番ポートにつなぐ設定 (標準的なSITL接続)
+        # 意味: 自分のポート14540を開けて、相手の14550にデータを送る
         fcu_url = "udp://:14551@"
     else:
         fcu_url = "/dev/ttyAMA0:921600" # 実機用の設定
