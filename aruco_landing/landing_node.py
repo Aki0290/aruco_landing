@@ -15,6 +15,7 @@ from mavros_msgs.msg import State
 from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import CameraInfo
 from sensor_msgs.msg import Image
 
 
@@ -42,6 +43,8 @@ class ArucoLandingNode(Node):
         self.current_state = None
         self.current_pose = None
         self.takeoff_position = None
+        self.last_action_time = 0.0
+        self.last_wait_log_time = 0.0
 
         self.search_radius = 0.5
         self.max_search_radius = 3.5
@@ -64,6 +67,9 @@ class ArucoLandingNode(Node):
         self.image_sub = self.create_subscription(
             Image, "/camera/image", self.image_callback, mavros_qos
         )
+        self.camera_info_sub = self.create_subscription(
+            CameraInfo, "/camera/camera_info", self.camera_info_callback, mavros_qos
+        )
         self.setpoint_pub = self.create_publisher(
             PoseStamped, "/mavros/setpoint_position/local", mavros_qos
         )
@@ -78,6 +84,7 @@ class ArucoLandingNode(Node):
             [[205.46, 0.0, 320], [0.0, 205.46, 240], [0.0, 0.0, 2.0]]
         )
         self.dist_coeffs = np.zeros(5, dtype=np.float32)
+        self.camera_info_received = False
 
         self.hsv_lower_green = np.array([35, 50, 50])
         self.hsv_upper_green = np.array([85, 255, 255])
@@ -132,42 +139,114 @@ class ArucoLandingNode(Node):
         ):
             self.detect_and_manage_objects(frame)
 
+    def camera_info_callback(self, msg):
+        if self.camera_info_received:
+            return
+
+        self.camera_matrix = np.array(msg.k, dtype=np.float64).reshape(3, 3)
+
+        if len(msg.d) >= 5:
+            self.dist_coeffs = np.array(msg.d[:5], dtype=np.float32)
+        else:
+            self.dist_coeffs = np.zeros(5, dtype=np.float32)
+
+        self.camera_info_received = True
+        self.get_logger().info("Camera intrinsics loaded from /camera/camera_info.")
+
     def control_loop(self):
-        if not self.current_state or not self.current_pose:
+        now = time.monotonic()
+
+        if not self.current_state:
+            if now - self.last_wait_log_time >= 5.0:
+                self.get_logger().info("Waiting for /mavros/state...")
+                self.last_wait_log_time = now
             return
 
         if self.mission_state == MissionState.WAITING_FOR_CONNECTION:
             if self.current_state.connected:
                 self.get_logger().info("MAVROS Connected. Proceeding to set mode.")
                 self.mission_state = MissionState.SETTING_MODE
-                self.set_mode_client.call_async(SetMode.Request(custom_mode="GUIDED"))
 
         elif self.mission_state == MissionState.SETTING_MODE:
             if self.current_state.mode == "GUIDED":
                 self.get_logger().info("Mode is now GUIDED. Proceeding to arm.")
                 self.mission_state = MissionState.ARMING
-                self.arming_client.call_async(CommandBool.Request(value=True))
+                self.last_action_time = 0.0
+            elif now - self.last_action_time >= 2.0:
+                self.get_logger().info("Requesting GUIDED mode...")
+                future = self.set_mode_client.call_async(
+                    SetMode.Request(custom_mode="GUIDED")
+                )
+                future.add_done_callback(self.mode_response_callback)
+                self.last_action_time = now
 
         elif self.mission_state == MissionState.ARMING:
             if self.current_state.armed:
                 self.get_logger().info("Vehicle is armed. Proceeding to takeoff.")
                 self.mission_state = MissionState.TAKING_OFF
                 self.takeoff_position = self.current_pose
-                self.takeoff_client.call_async(
+                self.last_action_time = 0.0
+            elif now - self.last_action_time >= 2.0:
+                self.get_logger().info("Requesting vehicle arm...")
+                future = self.arming_client.call_async(
+                    CommandBool.Request(value=True)
+                )
+                future.add_done_callback(self.arm_response_callback)
+                self.last_action_time = now
+
+        elif self.mission_state == MissionState.TAKING_OFF:
+            if self.takeoff_position is None and self.current_pose is not None:
+                self.takeoff_position = self.current_pose
+            below_target = (
+                self.current_pose is None
+                or self.current_pose.pose.position.z < self.search_height - 0.3
+            )
+            if now - self.last_action_time >= 2.0 and below_target:
+                self.get_logger().info(
+                    f"Requesting takeoff to {self.search_height:.1f} m..."
+                )
+                future = self.takeoff_client.call_async(
                     CommandTOL.Request(
                         altitude=self.search_height,
                         latitude=float("nan"),
                         longitude=float("nan"),
                     )
                 )
-
-        elif self.mission_state == MissionState.TAKING_OFF:
-            if abs(self.current_pose.pose.position.z - self.search_height) < 0.3:
+                future.add_done_callback(self.takeoff_response_callback)
+                self.last_action_time = now
+            if self.current_pose is None:
+                if now - self.last_wait_log_time >= 5.0:
+                    self.get_logger().warn(
+                        "Takeoff requested; waiting for /mavros/local_position/pose..."
+                    )
+                    self.last_wait_log_time = now
+            elif abs(self.current_pose.pose.position.z - self.search_height) < 0.3:
                 self.get_logger().info("Takeoff complete. Switching to SEARCHING mode.")
                 self.mission_state = MissionState.SEARCHING
 
         elif self.mission_state == MissionState.SEARCHING:
             self.execute_search_pattern()
+
+    def mode_response_callback(self, future):
+        try:
+            if not future.result().mode_sent:
+                self.get_logger().warn("GUIDED mode request was rejected; retrying.")
+        except Exception as exc:
+            self.get_logger().error(f"GUIDED mode request failed: {exc}")
+
+    def arm_response_callback(self, future):
+        try:
+            if not future.result().success:
+                self.get_logger().warn("Arm request was rejected; check PreArm messages.")
+        except Exception as exc:
+            self.get_logger().error(f"Arm request failed: {exc}")
+
+    def takeoff_response_callback(self, future):
+        try:
+            if not future.result().success:
+                self.get_logger().warn("Takeoff request was rejected; retrying.")
+        except Exception as exc:
+            self.get_logger().error(f"Takeoff request failed: {exc}")
 
     def detect_aruco(self, frame):
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -377,7 +456,9 @@ def main(args=None):
     finally:
         if node:
             node.destroy_node()
-        rclpy.shutdown()
+        # ROS 2 launch may already have shut the context down after SIGINT.
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

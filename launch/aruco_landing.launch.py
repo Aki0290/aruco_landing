@@ -17,11 +17,19 @@ def launch_setup(context, *args, **kwargs):
     else:
         fcu_url = "/dev/ttyAMA0:921600" # 実機用の設定
 
+    mavros_parameters = {'fcu_url': fcu_url}
+    if sim_mode:
+        # The landing node does not use the MAVROS parameter service.  Avoid
+        # downloading ArduPilot's entire parameter table over the UDP relay.
+        mavros_parameters['plugin_denylist'] = [
+            'param', 'waypoint', 'geofence', 'rallypoint'
+        ]
+
     mavros_node = Node(
         package='mavros',
         executable='mavros_node',
         output='screen',
-        parameters=[{'fcu_url': fcu_url}]
+        parameters=[mavros_parameters]
     )
 
     # --- あなたの自作ノードの定義 ---

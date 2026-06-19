@@ -26,6 +26,28 @@ This package enables a drone to perform autonomous missions as required by the E
 * A unified launch system that handles both simulation and real-world flight configurations.
 
 ## 1. Setup
+### Install the included simulation assets
+
+The repository includes the tested Gazebo world, ArUco marker models (IDs 101
+and 102), green probes, gimbal setup, camera configuration, and RViz settings.
+After creating the standard ArduPilot workspace at `~/ardu_ws`, install them
+with:
+
+```bash
+cd ~/ros2_ws/src/aruco_landing
+chmod +x scripts/install_simulation_assets.sh
+./scripts/install_simulation_assets.sh
+```
+
+If the ArduPilot workspace is elsewhere, specify it explicitly:
+
+```bash
+ARDU_WS=/path/to/ardu_ws ./scripts/install_simulation_assets.sh
+```
+
+The tested upstream revisions are documented in
+[`simulation/README.md`](simulation/README.md).
+
 ### Build the Package
 Navigate to your ROS 2 workspace and build the `aruco_landing` package.
 ```bash
@@ -72,7 +94,7 @@ MAVProxy is useful for monitoring status and sending manual commands (e.g., `mod
 mavproxy.py --master=udp:127.0.0.1:14550 --out=udp:127.0.0.1:14551 --console --map
 ```
 
-You need to setup these parameters below.
+The gimbal startup values below are now applied automatically by the ArduPilot Gazebo launch, so you do not need to type them every time.
 
 ```
 param set SERVO9_FUNCTION 59
@@ -87,6 +109,8 @@ This single command starts both MAVROS and our custom node. The `sim:=true` argu
 ```bash
 ros2 launch aruco_landing aruco_landing.launch.py sim:=true
 ```
+
+If you prefer the older name, `aruco_simulation.launch.py` is provided as an alias for the same launch setup.
 
 ---
 

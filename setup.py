@@ -19,9 +19,8 @@ setup(
     zip_safe=True,
     maintainer='akihiro',
     maintainer_email='nakayama.akihiro.p5@dc.tohoku.ac.jp',
-    description='TODO: Package description',
-    license='TODO: License declaration',
-    tests_require=['pytest'],
+    description='ROS 2 autonomous ArUco landing and object-search package.',
+    license='MIT',
     entry_points={
         'console_scripts': [ 'landing_node = aruco_landing.landing_node:main', # async mainをラップ
         ],
