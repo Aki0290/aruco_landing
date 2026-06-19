@@ -2,6 +2,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction, IncludeLaunchDescription
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 
@@ -37,7 +38,12 @@ def launch_setup(context, *args, **kwargs):
         package='aruco_landing',
         executable='landing_node',
         name='aruco_landing_node',
-        output='screen'
+        output='screen',
+        parameters=[{
+            'search_height': ParameterValue(
+                LaunchConfiguration('search_height'), value_type=float
+            )
+        }]
     )
     
     # --- Intel RealSenseカメラの起動定義 ---
@@ -81,8 +87,14 @@ def generate_launch_description():
         default_value='false',
         description='Set to "true" to run in simulation mode.'
     )
+    search_height_arg = DeclareLaunchArgument(
+        'search_height',
+        default_value='2.0',
+        description='Takeoff and search altitude in meters.'
+    )
 
     return LaunchDescription([
         sim_arg,
+        search_height_arg,
         OpaqueFunction(function=launch_setup)
     ])

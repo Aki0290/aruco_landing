@@ -25,6 +25,25 @@ This package enables a drone to perform autonomous missions as required by the E
 * Calculation and logging of object positions relative to the takeoff point.
 * A unified launch system that handles both simulation and real-world flight configurations.
 
+Object positions are estimated by projecting each detected image point through
+the calibrated camera model, applying the live gimbal and vehicle TF
+rotations, and intersecting the resulting ray with the takeoff ground plane.
+Accurate results therefore require a valid `/camera/camera_info` message and a
+correct `base_link` to camera-frame transform.
+
+The simulation defaults also apply the Gazebo camera sensor pose
+`roll=-1.57`, `pitch=-1.57`, `yaw=0`. For real hardware, set the
+`camera_mount_roll`, `camera_mount_pitch`, and `camera_mount_yaw` ROS
+parameters to the measured camera mounting angles in radians.
+
+The simulation disables the upstream `CameraZoomPlugin`. That plugin changes
+the rendered field of view without updating `CameraInfo`, which makes metric
+image projection incorrect. The simulated camera therefore uses the fixed
+D455-like horizontal field of view declared in the SDF.
+
+The default takeoff and search altitude is `2.0` m. It can be changed without
+editing the node by setting the ROS parameter `search_height`.
+
 ## 1. Setup
 Clone this package into a ROS 2 workspace:
 
@@ -122,6 +141,12 @@ This single command starts both MAVROS and our custom node. The `sim:=true` argu
 source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 ros2 launch aruco_landing aruco_landing.launch.py sim:=true
+```
+
+To override the default altitude, for example:
+
+```bash
+ros2 launch aruco_landing aruco_landing.launch.py sim:=true search_height:=2.5
 ```
 
 If you prefer the older name, `aruco_simulation.launch.py` is provided as an alias for the same launch setup.

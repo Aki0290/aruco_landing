@@ -10,6 +10,7 @@ import cv2.aruco as aruco
 import cv_bridge
 import numpy as np
 import rclpy
+from rclpy.time import Time
 from geometry_msgs.msg import PoseStamped
 from mavros_msgs.msg import State
 from mavros_msgs.srv import CommandBool, CommandTOL, SetMode
@@ -17,6 +18,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CameraInfo
 from sensor_msgs.msg import Image
+from tf2_ros import Buffer, TransformException, TransformListener
 
 
 class MissionState(IntEnum):
@@ -36,7 +38,8 @@ class ArucoLandingNode(Node):
 
         self.landing_marker_id = 102
         self.marker_length = 0.15
-        self.search_height = 1.0
+        self.declare_parameter("search_height", 2.0)
+        self.search_height = float(self.get_parameter("search_height").value)
         self.centering_tolerance = 0.1
 
         self.mission_state = MissionState.WAITING_FOR_CONNECTION
@@ -85,6 +88,18 @@ class ArucoLandingNode(Node):
         )
         self.dist_coeffs = np.zeros(5, dtype=np.float32)
         self.camera_info_received = False
+        self.camera_frame = "pitch_link"
+        self.declare_parameter("camera_mount_roll", -1.57)
+        self.declare_parameter("camera_mount_pitch", -1.57)
+        self.declare_parameter("camera_mount_yaw", 0.0)
+        self.camera_mount_rpy = (
+            self.get_parameter("camera_mount_roll").value,
+            self.get_parameter("camera_mount_pitch").value,
+            self.get_parameter("camera_mount_yaw").value,
+        )
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.last_tf_warning_time = 0.0
 
         self.hsv_lower_green = np.array([35, 50, 50])
         self.hsv_upper_green = np.array([85, 255, 255])
@@ -151,6 +166,8 @@ class ArucoLandingNode(Node):
             self.dist_coeffs = np.zeros(5, dtype=np.float32)
 
         self.camera_info_received = True
+        if msg.header.frame_id:
+            self.camera_frame = msg.header.frame_id
         self.get_logger().info("Camera intrinsics loaded from /camera/camera_info.")
 
     def control_loop(self):
@@ -354,9 +371,12 @@ class ArucoLandingNode(Node):
             center_u = int(M["m10"] / M["m00"])
             center_v = int(M["m01"] / M["m00"])
 
-            camera_coords, world_coords = self.transform_pixel_to_frames(
+            result = self.transform_pixel_to_frames(
                 center_u, center_v
             )
+            if result is None:
+                continue
+            camera_coords, world_coords = result
 
             is_new = True
             for saved_pos in self.detected_objects_positions:
@@ -370,7 +390,17 @@ class ArucoLandingNode(Node):
 
             if is_new:
                 self.get_logger().info(
-                    f">>> New green object DETECTED! Total: {len(self.detected_objects_positions) + 1} <<<"
+                    f">>> New green object DETECTED! Total: "
+                    f"{len(self.detected_objects_positions) + 1}; "
+                    f"estimated world position=({world_coords[0]:.3f}, "
+                    f"{world_coords[1]:.3f}); pixel=({center_u}, {center_v}); "
+                    f"vehicle=({self.current_pose.pose.position.x:.3f}, "
+                    f"{self.current_pose.pose.position.y:.3f}, "
+                    f"{self.current_pose.pose.position.z:.3f}); "
+                    f"camera_xyz=({camera_coords[0]:.3f}, "
+                    f"{camera_coords[1]:.3f}, {camera_coords[2]:.3f}); "
+                    f"fx={self.camera_matrix[0, 0]:.2f}, "
+                    f"fy={self.camera_matrix[1, 1]:.2f} <<<"
                 )
                 self.detected_objects_positions.append(world_coords)
                 self.detected_objects_camera_coords.append(camera_coords)
@@ -384,29 +414,107 @@ class ArucoLandingNode(Node):
                 )
 
     def transform_pixel_to_frames(self, u, v):
-        Zc = self.current_pose.pose.position.z
         fx = self.camera_matrix[0, 0]
         fy = self.camera_matrix[1, 1]
         cx = self.camera_matrix[0, 2]
         cy = self.camera_matrix[1, 2]
 
-        Xc = (u - cx) * Zc / fx
-        Yc = (v - cy) * Zc / fy
-        camera_coords = (Xc, Yc, Zc)
+        # Camera optical coordinates: +x right, +y down, +z forward.
+        optical_ray = np.array([(u - cx) / fx, (v - cy) / fy, 1.0])
 
-        yaw = self.get_yaw_from_pose(self.current_pose.pose)
+        try:
+            camera_in_body = self.tf_buffer.lookup_transform(
+                "base_link", self.camera_frame, Time()
+            )
+        except TransformException as exc:
+            now = time.monotonic()
+            if now - self.last_tf_warning_time >= 5.0:
+                self.get_logger().warn(
+                    f"Cannot transform camera frame '{self.camera_frame}' to "
+                    f"base_link; object position skipped: {exc}"
+                )
+                self.last_tf_warning_time = now
+            return None
 
-        dx = -Yc
-        dy = -Xc
+        # Gazebo's camera sensor uses pitch_link as its frame. Convert the
+        # optical convention to the link convention (+x forward, +y left,
+        # +z up) before applying the dynamic gimbal transform.
+        ray_camera_link = np.array(
+            [optical_ray[2], -optical_ray[0], -optical_ray[1]]
+        )
+        ray_camera_link = self.rotate_vector_by_rpy(
+            ray_camera_link, *self.camera_mount_rpy
+        )
 
-        world_offset_x = dx * math.cos(yaw) - dy * math.sin(yaw)
-        world_offset_y = dx * math.sin(yaw) + dy * math.cos(yaw)
+        tf_rotation = camera_in_body.transform.rotation
+        ray_body = self.rotate_vector_by_quaternion(ray_camera_link, tf_rotation)
 
-        object_world_x = self.current_pose.pose.position.x + world_offset_x
-        object_world_y = self.current_pose.pose.position.y + world_offset_y
-        world_coords = (object_world_x, object_world_y)
+        body_rotation = self.current_pose.pose.orientation
+        ray_world = self.rotate_vector_by_quaternion(ray_body, body_rotation)
 
+        camera_offset_body = np.array(
+            [
+                camera_in_body.transform.translation.x,
+                camera_in_body.transform.translation.y,
+                camera_in_body.transform.translation.z,
+            ]
+        )
+        camera_offset_world = self.rotate_vector_by_quaternion(
+            camera_offset_body, body_rotation
+        )
+        camera_world = np.array(
+            [
+                self.current_pose.pose.position.x,
+                self.current_pose.pose.position.y,
+                self.current_pose.pose.position.z,
+            ]
+        ) + camera_offset_world
+
+        ground_z = self.takeoff_position.pose.position.z
+        if ray_world[2] >= -1e-3:
+            self.get_logger().warn(
+                "Camera ray does not point toward the ground; object position skipped.",
+                throttle_duration_sec=5.0,
+            )
+            return None
+
+        distance = (ground_z - camera_world[2]) / ray_world[2]
+        if distance <= 0.0:
+            return None
+
+        object_world = camera_world + distance * ray_world
+        camera_coords = tuple((distance * optical_ray).tolist())
+        world_coords = (float(object_world[0]), float(object_world[1]))
         return camera_coords, world_coords
+
+    @staticmethod
+    def rotate_vector_by_quaternion(vector, quaternion):
+        q = np.array(
+            [quaternion.x, quaternion.y, quaternion.z, quaternion.w],
+            dtype=np.float64,
+        )
+        norm = np.linalg.norm(q)
+        if norm == 0.0:
+            return np.asarray(vector, dtype=np.float64)
+        q /= norm
+        xyz = q[:3]
+        w = q[3]
+        vector = np.asarray(vector, dtype=np.float64)
+        return vector + 2.0 * np.cross(xyz, np.cross(xyz, vector) + w * vector)
+
+    @staticmethod
+    def rotate_vector_by_rpy(vector, roll, pitch, yaw):
+        cr, sr = math.cos(roll), math.sin(roll)
+        cp, sp = math.cos(pitch), math.sin(pitch)
+        cy, sy = math.cos(yaw), math.sin(yaw)
+        rotation = np.array(
+            [
+                [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+                [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+                [-sp, cp * sr, cp * cr],
+            ]
+        )
+        return rotation @ np.asarray(vector, dtype=np.float64)
 
     def update_log_file(self):
         try:
