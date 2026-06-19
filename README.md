@@ -26,6 +26,18 @@ This package enables a drone to perform autonomous missions as required by the E
 * A unified launch system that handles both simulation and real-world flight configurations.
 
 ## 1. Setup
+Clone this package into a ROS 2 workspace:
+
+```bash
+mkdir -p ~/ros2_ws/src
+cd ~/ros2_ws/src
+git clone https://github.com/Aki0290/aruco_landing.git
+```
+
+Install the ArduPilot ROS 2 / Gazebo workspace separately by following the
+official documentation linked above. The expected default location is
+`~/ardu_ws`.
+
 ### Install the included simulation assets
 
 The repository includes the tested Gazebo world, ArUco marker models (IDs 101
@@ -51,7 +63,8 @@ The tested upstream revisions are documented in
 ### Build the Package
 Navigate to your ROS 2 workspace and build the `aruco_landing` package.
 ```bash
-cd ros2_ws
+source /opt/ros/humble/setup.bash
+cd ~/ros2_ws
 colcon build --packages-select aruco_landing
 source ~/ros2_ws/install/setup.bash
 ```
@@ -72,9 +85,9 @@ source install/setup.bash
 This section explains how to test the system in a SITL (Software-In-The-Loop) environment.
 
 > [!IMPORTANT]
-> In each new terminal, ensure you have sourced both your ROS 2 workspace and the ArduPilot Gazebo workspace.
+> Source ROS 2 and the required workspace in every new terminal.
 > ```bash
-> # In every terminal you use:
+> source /opt/ros/humble/setup.bash
 > source ~/ros2_ws/install/setup.bash
 > source ~/ardu_ws/install/setup.bash
 > ```
@@ -85,28 +98,29 @@ The simulation requires three separate terminals.
 #### Terminal 1: Launch Gazebo Environment & SITL
 This command starts the Gazebo world and the ArduPilot SITL vehicle instance.
 ```bash
+source /opt/ros/humble/setup.bash
+source ~/ardu_ws/install/setup.bash
 ros2 launch ardupilot_gz_bringup iris_runway.launch.py
 ```
 
-#### Terminal 2: Launch MAVProxy (Optional but Recommended)
-MAVProxy is useful for monitoring status and sending manual commands (e.g., `mode guided`, `arm throttle`, `takeoff 1`).
+Wait until ArduPilot reports that it is ready before starting the remaining
+terminals.
+
+#### Terminal 2: Launch the MAVProxy UDP relay (Required)
+This relay forwards SITL MAVLink traffic from port `14550` to MAVROS on port
+`14551`. The console and map are also useful for checking `PreArm` messages.
 ```bash
 mavproxy.py --master=udp:127.0.0.1:14550 --out=udp:127.0.0.1:14551 --console --map
 ```
 
-The gimbal startup values below are now applied automatically by the ArduPilot Gazebo launch, so you do not need to type them every time.
-
-```
-param set SERVO9_FUNCTION 59
-param set SERVO10_FUNCTION 60
-rc 8 1500
-rc 9 1500
-rc 10 1300
-```
+The previous manual gimbal parameter and RC commands are applied automatically
+by the simulation overlay.
 
 #### Terminal 3: Launch Onboard Software
 This single command starts both MAVROS and our custom node. The `sim:=true` argument configures MAVROS for the simulation.
 ```bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
 ros2 launch aruco_landing aruco_landing.launch.py sim:=true
 ```
 
@@ -116,6 +130,12 @@ If you prefer the older name, `aruco_simulation.launch.py` is provided as an ali
 
 ## 3. Running on Real Hardware
 This section describes how to run the system on the actual drone with a Raspberry Pi 4.
+
+> [!CAUTION]
+> The current code has been validated in SITL. Before fitting propellers,
+> verify the serial device, baud rate, RealSense topics, camera-to-body frame,
+> failsafe behavior, flight limits, mode changes, and arming behavior on the
+> actual flight controller. Do not treat SITL validation as flight approval.
 
 ### 3.1. Onboard Computer (Raspberry Pi 4)
 On the Raspberry Pi 4 connected to your flight controller, execute this single command. It will launch MAVROS (configured for a serial connection), the RealSense camera driver, and the main landing/detection node.
