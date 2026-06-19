@@ -3,9 +3,9 @@
 <package format="3">
   <name>aruco_landing</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>ROS 2 autonomous ArUco landing and object-search package.</description>
   <maintainer email="nakayama.akihiro.p5@dc.tohoku.ac.jp">akihiro</maintainer>
-  <license>TODO: License declaration</license>
+  <license>MIT</license>
 
   <depend>rclpy</depend>
   <depend>mavros_msgs</depend>
